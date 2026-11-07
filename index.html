@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vesper · Midnight Signal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,680&family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="set">
+      <section class="figure">
+        <div class="dial" id="dial" data-expression="listen" data-gesture="still" aria-label="Vesper">
+          <div class="bezel">
+            <div class="halo" aria-hidden="true"></div>
+            <div class="glass" aria-hidden="true"></div>
+            <div class="face" aria-hidden="true">
+              <span class="eye left"></span>
+              <span class="eye right"></span>
+              <span class="mouth"></span>
+            </div>
+            <div class="needle" aria-hidden="true"></div>
+            <span class="tick t1" aria-hidden="true"></span>
+            <span class="tick t2" aria-hidden="true"></span>
+            <span class="tick t3" aria-hidden="true"></span>
+          </div>
+        </div>
+        <p class="freq" id="freq">1610 kHz · lamp cold</p>
+      </section>
+
+      <section class="log">
+        <p class="kicker">Midnight Signal</p>
+        <h1>Vesper</h1>
+        <p class="lede">Ask about the match, the news, the code, or the thing you were just talking about.</p>
+        <div class="modes" id="modes" role="group" aria-label="Assistant mode">
+          <button type="button" data-mode="vesper" aria-pressed="true">Vesper</button>
+          <button type="button" data-mode="researcher">Researcher</button>
+          <button type="button" data-mode="developer">Developer</button>
+          <button type="button" data-mode="tutor">Tutor</button>
+          <button type="button" data-mode="sports">Sports</button>
+          <button type="button" data-mode="creative">Creative</button>
+        </div>
+        <p id="caption" class="caption" aria-live="polite">The channel is open. Speak, or type.</p>
+        <p id="detail" class="detail" hidden></p>
+        <div id="followups" class="followups"></div>
+        <ul id="sources" class="sources"></ul>
+        <p id="open-row" class="open-row" hidden><a id="open-link" href="" target="_blank" rel="noopener noreferrer">Open site</a></p>
+        <ol id="book" class="book"></ol>
+        <form id="composer">
+          <label class="sr" for="line">Message</label>
+          <input id="line" name="line" autocomplete="off" placeholder="Speak or type" />
+          <div class="row">
+            <button type="button" id="mic" aria-pressed="false">Listen</button>
+            <button type="submit">Send</button>
+            <button type="button" id="save" disabled>Save this answer</button>
+          </div>
+        </form>
+        <p id="status" class="status" role="status">If this line stays, hard-reload the page.</p>
+        <section class="saved" aria-label="Saved notes">
+          <h2>Saved</h2>
+          <ul id="memories"></ul>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

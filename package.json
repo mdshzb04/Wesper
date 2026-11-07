@@ -1,0 +1,13 @@
+{
+  "name": "midnight-signal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test src/session.test.js src/mind.test.js"
+  },
+  "dependencies": {
+    "vite": "^6.4.5"
+  }
+}

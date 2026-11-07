@@ -1,0 +1,183 @@
+:root {
+  --sky: #f4fbff;
+  --cyan: #d7f6ff;
+  --blue: #2f6fed;
+  --lavender: #e4dcff;
+  --ink: #1c2740;
+  --paper: #ffffff;
+  --filament: #e7a23a;
+  --signal: #e23d3d;
+  --mute: #5d6b8a;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background:
+    radial-gradient(900px 480px at 10% 0%, var(--cyan), transparent 60%),
+    radial-gradient(800px 500px at 100% 20%, var(--lavender), transparent 55%),
+    var(--sky);
+  color: var(--ink);
+  font-family: Fraunces, Georgia, serif;
+}
+
+.set {
+  display: grid;
+  grid-template-columns: minmax(280px, 560px) minmax(280px, 460px);
+  gap: 36px;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 28px 20px 40px;
+}
+
+.figure { display: grid; justify-items: center; gap: 12px; }
+.dial { display: grid; justify-items: center; }
+.bezel {
+  position: relative;
+  width: min(78vw, 380px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 42%, #6d5cff 0 46%, transparent 47%),
+    repeating-conic-gradient(from 0deg, #8a6233 0 2deg, #3a2818 2deg 8deg);
+  box-shadow: 0 24px 50px #2f6fed33, inset 0 0 0 12px #fff;
+}
+.halo, .glass, .face, .needle { position: absolute; }
+.halo {
+  inset: 7%;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  pointer-events: none;
+}
+body[data-phase="speaking"] .halo,
+body[data-phase="listening"] .halo {
+  border-color: #7ec8ff;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.glass {
+  inset: 11%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff55, transparent 32%);
+}
+.face { left: 50%; top: 48%; width: 46%; height: 38%; transform: translate(-50%, -50%); }
+.eye {
+  position: absolute;
+  top: 18%;
+  width: 22%;
+  height: 28%;
+  border-radius: 50%;
+  background: var(--filament);
+  box-shadow: 0 0 16px var(--filament);
+}
+.eye.left { left: 18%; }
+.eye.right { right: 18%; }
+.mouth {
+  position: absolute;
+  left: 28%;
+  right: 28%;
+  bottom: 16%;
+  height: 8%;
+  border-radius: 99px;
+  background: var(--signal);
+}
+.dial[data-expression="listen"] .eye { height: 18%; top: 24%; }
+.dial[data-expression="wary"] .eye { transform: scaleX(0.7); }
+.dial[data-expression="smile"] .mouth { height: 16%; border-radius: 0 0 40px 40px; }
+.dial[data-expression="startled"] .eye { height: 36%; top: 8%; background: #9fd7ff; }
+.dial[data-expression="grief"] .mouth { width: 30%; left: 35%; height: 6%; background: var(--mute); }
+.dial[data-expression="speak"] .mouth { animation: talk 0.28s steps(2) infinite; }
+.needle {
+  left: 50%;
+  bottom: 16%;
+  width: 4px;
+  height: 28%;
+  background: linear-gradient(var(--signal), var(--filament));
+  transform-origin: 50% 100%;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  transition: transform 0.45s ease;
+}
+.dial[data-gesture="lean"] .needle { transform: translateX(-50%) rotate(-22deg); }
+.dial[data-gesture="point"] .needle { transform: translateX(-50%) rotate(26deg); }
+.dial[data-gesture="recoil"] .needle { transform: translateX(-50%) rotate(-48deg); }
+.dial[data-gesture="hush"] .needle { transform: translateX(-50%) rotate(8deg); height: 18%; }
+.dial[data-gesture="reach"] .needle { transform: translateX(-50%) rotate(42deg); }
+.tick { position: absolute; width: 2px; height: 10px; background: #f4efe6; left: 50%; top: 8%; }
+.t2 { transform: rotate(18deg); transform-origin: 50% 170px; }
+.t3 { transform: rotate(-18deg); transform-origin: 50% 170px; }
+
+.freq, .status, .kicker {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.freq { margin: 0; letter-spacing: 0.12em; text-transform: uppercase; color: var(--blue); font-size: 12px; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+button:disabled { opacity: 0.45; cursor: default; }
+#mic[aria-pressed="true"] { background: var(--blue); color: white; }
+.log { max-width: 460px; }
+.kicker { margin: 0 0 8px; letter-spacing: 0.16em; text-transform: uppercase; color: #6d63c6; font-size: 12px; }
+h1 {
+  margin: 0;
+  font-family: Syne, sans-serif;
+  font-weight: 800;
+  font-size: clamp(42px, 6vw, 64px);
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  color: var(--blue);
+}
+.lede { color: var(--mute); }
+.modes, .followups, .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.modes { margin: 12px 0; }
+.modes button, .followups button, .row button, .saved button {
+  border: 1px solid #c9d8ff;
+  background: var(--paper);
+  color: var(--blue);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: 500 13px "IBM Plex Mono", monospace;
+}
+.modes button[aria-pressed="true"] { background: var(--blue); color: white; }
+.caption { min-height: 3.2em; font-size: 22px; line-height: 1.35; }
+.detail { color: var(--ink); line-height: 1.45; }
+.sources, .saved ul { list-style: none; margin: 8px 0 12px; padding: 0; }
+.sources li, .saved li {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid #d7e7ff;
+  border-radius: 16px;
+  background: #ffffffcc;
+}
+.sources a, .open-row a { color: var(--blue); }
+.sources p, .saved li span { margin: 4px 0 0; color: var(--mute); font-size: 14px; }
+.saved h2 { margin: 16px 0 8px; font: 500 12px "IBM Plex Mono", monospace; letter-spacing: 0.14em; text-transform: uppercase; color: #6d63c6; }
+.saved li { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.book { list-style: none; margin: 0 0 12px; padding: 0; max-height: 160px; overflow: auto; }
+.book li { padding: 8px 0; border-bottom: 1px solid #d5e6ff; }
+.book b { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: #6d63c6; margin-right: 8px; }
+.row { margin-top: 8px; }
+input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #b9cfff;
+  background: transparent;
+  color: var(--ink);
+  padding: 10px 0;
+  font-size: 18px;
+}
+.status { min-height: 1.4em; color: #6d63c6; font-size: 13px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+@media (max-width: 800px) {
+  .set { grid-template-columns: 1fr; gap: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .needle, .halo, .dial[data-expression="speak"] .mouth { animation: none; transition: none; }
+}
+
+@keyframes talk { 50% { transform: scaleY(0.4); } }
+@keyframes pulse {
+  50% { transform: scale(1.04); opacity: 0.7; }
+}
