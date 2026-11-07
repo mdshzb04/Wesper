@@ -1,6 +1,6 @@
 # Midnight Signal
 
-Vesper is the Midnight Signal voice assistant. AssemblyAI listens and speaks. OpenAI reasons. Web search runs on the server (Brave if `BRAVE_SEARCH_API_KEY` is set, otherwise DuckDuckGo). Notes are saved only when you ask. Reactor is not called.
+Vesper is the Midnight Signal voice assistant. AssemblyAI listens and speaks. OpenAI reasons. Web search runs on the server (Brave if `BRAVE_SEARCH_API_KEY` is set, otherwise DuckDuckGo). Notes are saved only when you ask.
 
 ```bash
 cp .env.example .env
