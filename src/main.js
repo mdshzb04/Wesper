@@ -27,7 +27,40 @@ function downsample(input, fromRate, toRate) {
 }
 
 const sessionKey = "midnight-signal-session";
+const stateKey = "wesper-state";
 let sessionId = sessionStorage.getItem(sessionKey) || "";
+let appState = loadState();
+
+function loadState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(stateKey) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function keepState(next) {
+  if (!next || typeof next !== "object") return;
+  appState = next;
+  localStorage.setItem(stateKey, JSON.stringify(appState));
+}
+
+async function readJson(response) {
+  const type = response.headers.get("content-type") || "";
+  if (!type.includes("application/json")) {
+    const text = await response.text();
+    const detail = text.replace(/\s+/g, " ").trim().slice(0, 120);
+    throw new Error(response.status === 404
+      ? "The voice API is missing on this host. It returned a page instead of data."
+      : (detail || `Request failed (${response.status})`));
+  }
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (data.sessionId) keepSession(data.sessionId);
+  if (data.state) keepState(data.state);
+  return data;
+}
 let generation = 0;
 let phase = "idle";
 
@@ -120,11 +153,10 @@ async function submit(utterance, fromCut) {
     const response = await fetch("/api/turn", {
       method: "POST",
       headers: { "content-type": "application/json", "x-session": sessionId },
-      body: JSON.stringify({ utterance: text, interrupted: fromCut }),
+      body: JSON.stringify({ utterance: text, interrupted: fromCut, state: appState }),
       signal: controller.signal,
     });
-    turn = await response.json();
-    if (!response.ok) throw new Error(turn.error || "Turn failed");
+    turn = await readJson(response);
   } catch (error) {
     if (error.name === "AbortError") return;
     mark("idle");
@@ -132,10 +164,6 @@ async function submit(utterance, fromCut) {
     return;
   }
   if (!acceptGeneration(generation, mine)) return;
-  if (turn.sessionId) {
-    sessionId = turn.sessionId;
-    sessionStorage.setItem(sessionKey, sessionId);
-  }
   setFace("listen", "still");
   showTurn(turn);
   writeLog("Vesper", turn.reply);
@@ -147,9 +175,19 @@ async function submit(utterance, fromCut) {
       body: JSON.stringify({ text: turn.reply }),
       signal: controller.signal,
     });
-    if (!speech.ok || !acceptGeneration(generation, mine)) {
+    const speechType = speech.headers.get("content-type") || "";
+    if (!speech.ok || !speechType.includes("audio") || !acceptGeneration(generation, mine)) {
       mark("idle");
-      if (!speech.ok) sayStatus("Speech did not come back");
+      if (!speech.ok || !speechType.includes("audio")) {
+        let message = "Speech did not come back";
+        if (speechType.includes("application/json")) {
+          const data = await speech.json().catch(() => ({}));
+          if (data.error) message = data.error;
+        } else if (!speech.ok) {
+          message = "Speech host returned a page instead of audio";
+        }
+        sayStatus(message);
+      }
       return;
     }
     const bytes = await speech.arrayBuffer();
@@ -203,8 +241,7 @@ async function openEar() {
   let token;
   try {
     const response = await fetch("/api/stt-token");
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "No speech token");
+    const data = await readJson(response);
     token = data.token;
   } catch (error) {
     sayStatus(error.message);
@@ -351,11 +388,10 @@ function renderMemory(items) {
       void fetch("/api/memory", {
         method: "DELETE",
         headers: { "content-type": "application/json", "x-session": sessionId },
-        body: JSON.stringify({ id: item.id }),
-      }).then((response) => response.json()).then((data) => {
-        if (data.sessionId) keepSession(data.sessionId);
+        body: JSON.stringify({ id: item.id, state: appState }),
+      }).then((response) => readJson(response)).then((data) => {
         renderMemory(data.items || []);
-      }).catch(() => sayStatus("Could not delete that note"));
+      }).catch((error) => sayStatus(error.message || "Could not delete that note"));
     });
     row.append(label, button);
     memories.append(row);
@@ -373,11 +409,9 @@ document.querySelector("#modes").addEventListener("click", (event) => {
   void fetch("/api/mode", {
     method: "POST",
     headers: { "content-type": "application/json", "x-session": sessionId },
-    body: JSON.stringify({ mode: button.dataset.mode }),
+    body: JSON.stringify({ mode: button.dataset.mode, state: appState }),
   }).then(async (response) => {
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Mode failed");
-    keepSession(data.sessionId);
+    await readJson(response);
     for (const item of document.querySelectorAll("#modes button")) item.setAttribute("aria-pressed", String(item === button));
     sayStatus(`${button.textContent} is on`);
   }).catch((error) => sayStatus(error.message));
@@ -388,26 +422,30 @@ saveButton.addEventListener("click", () => {
   void fetch("/api/memory", {
     method: "POST",
     headers: { "content-type": "application/json", "x-session": sessionId },
-    body: JSON.stringify({ text: lastAnswer, kind: "note" }),
+    body: JSON.stringify({ text: lastAnswer, kind: "note", state: appState }),
   }).then(async (response) => {
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not save");
-    keepSession(data.sessionId);
+    const data = await readJson(response);
     renderMemory(data.items || []);
     sayStatus("Saved");
   }).catch((error) => sayStatus(error.message));
 });
 
+if (Array.isArray(appState.memory) && appState.memory.length) renderMemory(appState.memory);
+if (appState.mode) {
+  for (const item of document.querySelectorAll("#modes button")) {
+    item.setAttribute("aria-pressed", String(item.dataset.mode === appState.mode));
+  }
+}
+
 fetch("/api/status")
-  .then((response) => response.json())
+  .then((response) => readJson(response))
   .then(async (flags) => {
     const missing = ["assemblyai", "openai"].filter((name) => !flags[name]);
     if (missing.length) sayStatus(`Server still needs ${missing.join(", ")}`);
     else sayStatus("Channel ready");
-    if (/^[a-zA-Z0-9-]{8,80}$/.test(sessionId)) {
-      const saved = await fetch("/api/memory", { headers: { "x-session": sessionId } });
-      const data = await saved.json();
+    if (!appState.memory?.length && /^[a-zA-Z0-9-]{8,80}$/.test(sessionId)) {
+      const data = await readJson(await fetch("/api/memory", { headers: { "x-session": sessionId } }));
       renderMemory(data.items || []);
     }
   })
-  .catch(() => sayStatus("Server is not answering"));
+  .catch((error) => sayStatus(error.message || "Server is not answering"));
