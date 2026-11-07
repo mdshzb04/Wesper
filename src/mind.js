@@ -202,17 +202,47 @@ export async function searchWeb(query, options = {}) {
     if (!response.ok) throw new Error(`Search failed (${response.status})`);
     return mapBrave(await response.json());
   }
+  try {
+    const rows = await duckSearch(q, fetcher);
+    if (rows.length) return rows;
+  } catch (error) {
+    const backup = await wikiSearch(q, fetcher).catch(() => []);
+    if (backup.length) return backup;
+    throw error;
+  }
+  return wikiSearch(q, fetcher);
+}
+
+const BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+async function duckSearch(q, fetcher) {
   const response = await fetcher("https://html.duckduckgo.com/html/", {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
-      "user-agent": "MidnightSignal/2.0",
+      accept: "text/html",
+      "user-agent": BROWSER,
     },
     body: new URLSearchParams({ q }),
     signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) throw new Error(`Search failed (${response.status})`);
   return parseDuck(await response.text());
+}
+
+async function wikiSearch(q, fetcher) {
+  const response = await fetcher(`https://en.wikipedia.org/w/rest.php/v1/search/page?limit=5&q=${encodeURIComponent(q)}`, {
+    headers: { accept: "application/json", "user-agent": "MidnightSignal/2.0" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`Search failed (${response.status})`);
+  const data = await response.json();
+  return (Array.isArray(data.pages) ? data.pages : []).slice(0, 5).map((page) => ({
+    title: clip(page.title, 140),
+    url: cleanUrl(`https://en.wikipedia.org/wiki/${page.key || page.title}`),
+    snippet: clip(String(page.description || page.excerpt || "").replace(/<[^>]+>/g, " "), 280),
+    date: "",
+  })).filter((item) => item.title && item.url);
 }
 
 export function cleanUrl(raw) {

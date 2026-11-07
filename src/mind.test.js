@@ -39,6 +39,16 @@ test("reminders, links, and search results are parsed, not invented", () => {
   assert.equal(brave[0].date, "2 hours ago");
 });
 
+test("a blocked web index falls back to Wikipedia", async () => {
+  const rows = await searchWeb("latest movie", {
+    fetcher: async (url) => {
+      if (String(url).includes("duckduckgo")) return { ok: false, status: 403, text: async () => "" };
+      return { ok: true, json: async () => ({ pages: [{ title: "Film", key: "Film", description: "A movie" }] }) };
+    },
+  });
+  assert.equal(rows[0].url, "https://en.wikipedia.org/wiki/Film");
+});
+
 test("search uses the injected fetcher and reports a failed provider", async () => {
   const ok = await searchWeb("cricket score", {
     fetcher: async () => ({ ok: true, text: async () => `<a class="result__a" href="https://example.com/score">Score</a><a class="result__snippet">Live board</a>` }),

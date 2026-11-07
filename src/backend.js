@@ -284,8 +284,10 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
             turn = await openaiTurn(state, `${utterance}\nDo not repeat your previous answer. Use the search results for this question.`, interrupted, sources, searchError);
           }
         } catch (error) {
-          console.error("turn fallback", error instanceof Error ? error.message : "failed");
+          const message = error instanceof Error ? error.message : "OpenAI failed";
+          console.error("turn fallback", message);
           turn = fallbackTurn(utterance, interrupted);
+          turn.reply = `I could not reach the model (${message}). I will not guess news or scores.`;
           source = "fallback";
         }
       }
