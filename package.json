@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "build": "vite build",
-    "test": "node --test src/session.test.js src/mind.test.js src/backend.test.js"
+    "test": "node --test src/session.test.js src/mind.test.js src/sports.test.js src/backend.test.js"
   },
   "dependencies": {
     "vite": "^6.4.5"

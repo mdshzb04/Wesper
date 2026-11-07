@@ -250,15 +250,48 @@ export async function searchWeb(query, options = {}) {
     if (!response.ok) throw new Error(`Search failed (${response.status})`);
     return mapBrave(await response.json());
   }
+  let duckError = null;
   try {
     const rows = await duckSearch(q, fetcher);
     if (rows.length) return rows;
   } catch (error) {
-    const backup = await wikiSearch(q, fetcher).catch(() => []);
-    if (backup.length) return backup;
-    throw error;
+    duckError = error;
   }
-  return wikiSearch(q, fetcher);
+  try {
+    const rows = await newsSearch(q, fetcher);
+    if (rows.length) return rows;
+  } catch (error) {
+    throw duckError || error;
+  }
+  if (duckError) throw duckError;
+  throw new Error("Search returned no results");
+}
+
+function xmlText(value) {
+  return strip(String(value || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"));
+}
+
+export function parseNews(xml) {
+  const items = String(xml ?? "").split("<item>").slice(1, 6);
+  const out = [];
+  for (const block of items) {
+    const title = clip(xmlText(block.match(/<title>([\s\S]*?)<\/title>/)?.[1] || ""), 140);
+    const link = xmlText(block.match(/<link>([\s\S]*?)<\/link>/)?.[1] || "");
+    const date = clip(xmlText(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || ""), 40);
+    const url = cleanUrl(link);
+    if (!title || !url) continue;
+    out.push({ title, url, snippet: title, date });
+  }
+  return out;
+}
+
+async function newsSearch(q, fetcher) {
+  const response = await fetcher(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en&gl=US&ceid=US:en`, {
+    headers: { accept: "application/rss+xml, text/xml", "user-agent": BROWSER },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`Search failed (${response.status})`);
+  return parseNews(await response.text());
 }
 
 const BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -276,21 +309,6 @@ async function duckSearch(q, fetcher) {
   });
   if (!response.ok) throw new Error(`Search failed (${response.status})`);
   return parseDuck(await response.text());
-}
-
-async function wikiSearch(q, fetcher) {
-  const response = await fetcher(`https://en.wikipedia.org/w/rest.php/v1/search/page?limit=5&q=${encodeURIComponent(q)}`, {
-    headers: { accept: "application/json", "user-agent": "MidnightSignal/2.0" },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!response.ok) throw new Error(`Search failed (${response.status})`);
-  const data = await response.json();
-  return (Array.isArray(data.pages) ? data.pages : []).slice(0, 5).map((page) => ({
-    title: clip(page.title, 140),
-    url: cleanUrl(`https://en.wikipedia.org/wiki/${page.key || page.title}`),
-    snippet: clip(String(page.description || page.excerpt || "").replace(/<[^>]+>/g, " "), 280),
-    date: "",
-  })).filter((item) => item.title && item.url);
 }
 
 export function cleanUrl(raw) {

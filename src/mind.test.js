@@ -52,14 +52,17 @@ test("reminders, links, and search results are parsed, not invented", () => {
   assert.equal(brave[0].date, "2 hours ago");
 });
 
-test("a blocked web index falls back to Wikipedia", async () => {
+test("a blocked web index uses news articles, not Wikipedia", async () => {
   const rows = await searchWeb("latest movie", {
     fetcher: async (url) => {
-      if (String(url).includes("duckduckgo")) return { ok: false, status: 403, text: async () => "" };
-      return { ok: true, json: async () => ({ pages: [{ title: "Film", key: "Film", description: "A movie" }] }) };
+      const target = String(url);
+      if (target.includes("wikipedia")) throw new Error("wikipedia was called");
+      if (target.includes("duckduckgo")) return { ok: false, status: 403, text: async () => "" };
+      return { ok: true, text: async () => `<item><title>India beat New Zealand</title><link>https://news.google.com/rss/articles/abc</link><pubDate>Sat, 07 Nov 2026 02:00:00 GMT</pubDate></item>` };
     },
   });
-  assert.equal(rows[0].url, "https://en.wikipedia.org/wiki/Film");
+  assert.equal(rows[0].url, "https://news.google.com/rss/articles/abc");
+  assert.equal(rows[0].date, "Sat, 07 Nov 2026 02:00:00 GMT");
 });
 
 test("search uses the injected fetcher and reports a failed provider", async () => {

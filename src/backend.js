@@ -22,6 +22,7 @@ import {
   shouldSearch,
   systemPrompt,
 } from "./mind.js";
+import { askKind, cricketCard, cricketQuestion, footballQuestion, loadFootball, speakStored, usesStoredMatch } from "./sports.js";
 
 const sessions = new Map();
 const STORE = new URL("../data/memory.json", import.meta.url);
@@ -88,7 +89,32 @@ function sanitize(raw) {
     mode: MODES.includes(raw.mode) ? raw.mode : "vesper",
     modeLock: Boolean(raw.modeLock),
     sources: cleanSources(raw.sources),
+    match: cleanMatch(raw.match),
     stamps: (Array.isArray(raw.stamps) ? raw.stamps : []).map(Number).filter(Number.isFinite).slice(-24),
+  };
+}
+
+function cleanMatch(raw) {
+  if (!raw || typeof raw !== "object" || !raw.id) return null;
+  const batters = (Array.isArray(raw.batters) ? raw.batters : []).slice(0, 11).map((batter) => ({
+    name: String(batter.name || "").slice(0, 60),
+    side: String(batter.side || "").slice(0, 40),
+    runs: String(batter.runs ?? "").slice(0, 8),
+    balls: String(batter.balls ?? "").slice(0, 8),
+    fours: String(batter.fours ?? "").slice(0, 4),
+    sixes: String(batter.sixes ?? "").slice(0, 4),
+    dismissal: String(batter.dismissal || "").slice(0, 40),
+  })).filter((batter) => batter.name);
+  return {
+    id: String(raw.id).slice(0, 24),
+    sport: raw.sport === "football" ? "football" : "cricket",
+    name: String(raw.name || "").slice(0, 80),
+    competition: String(raw.competition || "").slice(0, 80),
+    when: String(raw.when || "").slice(0, 40),
+    status: String(raw.status || "").slice(0, 40),
+    summary: String(raw.summary || "").slice(0, 280),
+    url: cleanUrl(raw.url),
+    batters,
   };
 }
 
@@ -111,6 +137,7 @@ function publicState(state) {
     mode: state.mode,
     modeLock: state.modeLock,
     sources: state.sources,
+    match: state.match,
     stamps: state.stamps,
   };
 }
@@ -276,6 +303,47 @@ function json(status, body) {
   return { status, body };
 }
 
+async function sportsAnswer(utterance, state) {
+  const kind = askKind(utterance);
+  const cricket = cricketQuestion(utterance);
+  const football = footballQuestion(utterance);
+  try {
+    if (usesStoredMatch(utterance, state.match)) {
+      const spoken = speakStored(kind, state.match);
+      const missed = spoken.reply.startsWith("The scorecard does not");
+      return {
+        ...spoken,
+        match: state.match,
+        stance: missed ? "unknown" : "fact",
+        source: "scores",
+        sources: state.match.url ? [{ title: state.match.name, url: state.match.url, snippet: state.match.summary, date: state.match.when }] : [],
+      };
+    }
+    if (football) {
+      const card = await loadFootball();
+      return { ...card, stance: card.match ? "fact" : "unknown", source: card.match ? "scores" : "fallback", searchError: card.match ? "" : "No live football match" };
+    }
+    if (cricket) {
+      const card = await cricketCard(kind);
+      return { ...card, stance: "fact", source: "scores" };
+    }
+  } catch (error) {
+    if (cricket || football) {
+      const message = publicFailure(error);
+      return {
+        reply: `I could not read the scoreboard (${message}). I will not guess the score.`,
+        detail: "",
+        topic: "Live scores",
+        stance: "unknown",
+        source: "fallback",
+        sources: [],
+        searchError: message,
+      };
+    }
+  }
+  return null;
+}
+
 export async function dispatch({ method, pathname, headers = {}, body = {} }) {
   const header = headers["x-session"] || headers["X-Session"] || "";
   if (pathname === "/api/status" && method === "GET") {
@@ -283,7 +351,8 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
       assemblyai: Boolean(key("ASSEMBLYAI_API_KEY")),
       openai: Boolean(key("OPENAI_API_KEY")),
       model: model(),
-      search: key("BRAVE_SEARCH_API_KEY") ? "brave" : "duckduckgo",
+      search: key("BRAVE_SEARCH_API_KEY") ? "brave" : "news",
+      sports: "espn",
     });
   }
 
@@ -353,6 +422,17 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
       }
       earlier = state.sources || [];
       follow = searchFollow(utterance, state);
+      const sports = await sportsAnswer(utterance, state);
+      if (sports) {
+        turn = blankTurn(sports.reply, { detail: sports.detail || "", topic: sports.topic || "", stance: sports.stance || "fact" });
+        source = sports.source;
+        sources = sports.sources || [];
+        searchError = sports.searchError || "";
+        if (sports.match) state.match = cleanMatch(sports.match);
+        state.lastLive = true;
+        if (turn.topic) state.topic = turn.topic;
+        state.lastWritten = [turn.reply, turn.detail].filter(Boolean).join("\n").slice(0, 500);
+      } else {
       const live = shouldSearch(utterance, state);
       const pageUrl = pageRequest(utterance);
       let page = "";
@@ -392,6 +472,7 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
       state.lastLive = live || Boolean(pageUrl);
       if (turn.topic) state.topic = turn.topic;
       state.lastWritten = [turn.reply, turn.detail].filter(Boolean).join("\n").slice(0, 500);
+      }
     } else {
       persistMemory(id, state.memory);
     }
