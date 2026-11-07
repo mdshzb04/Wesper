@@ -22,6 +22,20 @@ import {
 const sessions = new Map();
 const STORE = new URL("../data/memory.json", import.meta.url);
 
+export function compactKey(value) {
+  return String(value || "").replace(/\s+/g, "");
+}
+
+export function publicFailure(error) {
+  const text = error instanceof Error ? error.message : "OpenAI failed";
+  if (/sk-|bearer|authorization|api[_-]?key/i.test(text)) return "the server key is unreadable";
+  return text.replace(/\s+/g, " ").slice(0, 180);
+}
+
+function key(name) {
+  return compactKey(process.env[name]);
+}
+
 function voice() {
   return process.env.ASSEMBLYAI_VOICE_ID || "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3";
 }
@@ -177,7 +191,7 @@ Answer this latest sentence. Do not repeat your previous reply.`;
     method: "POST",
     signal: AbortSignal.timeout(20000),
     headers: {
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      authorization: `Bearer ${key("OPENAI_API_KEY")}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -203,17 +217,17 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
   const header = headers["x-session"] || headers["X-Session"] || "";
   if (pathname === "/api/status" && method === "GET") {
     return json(200, {
-      assemblyai: Boolean(process.env.ASSEMBLYAI_API_KEY),
-      openai: Boolean(process.env.OPENAI_API_KEY),
+      assemblyai: Boolean(key("ASSEMBLYAI_API_KEY")),
+      openai: Boolean(key("OPENAI_API_KEY")),
       model: model(),
-      search: process.env.BRAVE_SEARCH_API_KEY ? "brave" : "duckduckgo",
+      search: key("BRAVE_SEARCH_API_KEY") ? "brave" : "duckduckgo",
     });
   }
 
   if (pathname === "/api/stt-token" && method === "GET") {
-    if (!process.env.ASSEMBLYAI_API_KEY) return json(503, { error: "ASSEMBLYAI_API_KEY is missing on the server" });
+    if (!key("ASSEMBLYAI_API_KEY")) return json(503, { error: "ASSEMBLYAI_API_KEY is missing on the server" });
     const upstream = await fetch("https://streaming.assemblyai.com/v3/token?expires_in_seconds=480", {
-      headers: { authorization: process.env.ASSEMBLYAI_API_KEY },
+      headers: { authorization: key("ASSEMBLYAI_API_KEY") },
     });
     const data = await upstream.json().catch(() => ({}));
     if (!upstream.ok || !data.token) return json(upstream.status || 502, { error: "AssemblyAI refused the streaming token" });
@@ -268,12 +282,12 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
       const live = needsLive(utterance) || (follow && state.lastLive);
       if (live) {
         try {
-          sources = await searchWeb(searchQuery(utterance, state.topic, follow), { braveKey: process.env.BRAVE_SEARCH_API_KEY || "" });
+          sources = await searchWeb(searchQuery(utterance, state.topic, follow), { braveKey: key("BRAVE_SEARCH_API_KEY") });
         } catch (error) {
-          searchError = error instanceof Error ? error.message : "Search failed";
+          searchError = publicFailure(error);
         }
       }
-      if (!process.env.OPENAI_API_KEY) {
+      if (!key("OPENAI_API_KEY")) {
         turn = fallbackTurn(utterance, interrupted);
         source = "fallback";
       } else {
@@ -284,7 +298,7 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
             turn = await openaiTurn(state, `${utterance}\nDo not repeat your previous answer. Use the search results for this question.`, interrupted, sources, searchError);
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : "OpenAI failed";
+          const message = publicFailure(error);
           console.error("turn fallback", message);
           turn = fallbackTurn(utterance, interrupted);
           turn.reply = `I could not reach the model (${message}). I will not guess news or scores.`;
@@ -315,13 +329,13 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
   }
 
   if (pathname === "/api/tts" && method === "POST") {
-    if (!process.env.ASSEMBLYAI_API_KEY) return json(503, { error: "ASSEMBLYAI_API_KEY is missing on the server" });
+    if (!key("ASSEMBLYAI_API_KEY")) return json(503, { error: "ASSEMBLYAI_API_KEY is missing on the server" });
     const text = String(body.text || "").trim().slice(0, 500);
     if (!text) return json(400, { error: "Nothing to speak" });
     const upstream = await fetch("https://tts.us.assemblyai.com/v1/speech", {
       method: "POST",
       headers: {
-        authorization: process.env.ASSEMBLYAI_API_KEY,
+        authorization: key("ASSEMBLYAI_API_KEY"),
         "content-type": "application/json",
       },
       body: JSON.stringify({ text, voice_id: voice(), container: "wav", stream: false }),

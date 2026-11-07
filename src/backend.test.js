@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch } from "./backend.js";
+import { compactKey, dispatch, publicFailure } from "./backend.js";
+
+test("a broken key never reaches the listener", () => {
+  assert.equal(compactKey("sk-test\nmore"), "sk-testmore");
+  const leaked = publicFailure(new Error('Headers.append: "Bearer sk-test\\nabc"'));
+  assert.equal(leaked.includes("sk-"), false);
+  assert.match(leaked, /unreadable/);
+});
 
 test("missing routes answer with JSON, not an HTML page", async () => {
   const missing = await dispatch({ method: "GET", pathname: "/api/missing" });

@@ -39,6 +39,9 @@ export default async function handler(req, res) {
     const status = error.status || 500;
     res.statusCode = status;
     res.setHeader("content-type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ error: status === 500 ? "The channel dropped" : error.message }));
+    const message = status === 500 || /sk-|bearer|authorization/i.test(error.message || "")
+      ? "The channel dropped"
+      : String(error.message || "The channel dropped").slice(0, 180);
+    res.end(JSON.stringify({ error: message }));
   }
 }
