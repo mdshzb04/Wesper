@@ -30,6 +30,7 @@
             <span class="tick t3" aria-hidden="true"></span>
           </div>
         </div>
+        <div class="wave" id="wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
         <p class="freq" id="freq">1610 kHz · lamp cold</p>
       </section>
 
@@ -42,11 +43,14 @@
           <button type="button" data-mode="researcher">Researcher</button>
           <button type="button" data-mode="developer">Developer</button>
           <button type="button" data-mode="tutor">Tutor</button>
-          <button type="button" data-mode="sports">Sports</button>
+          <button type="button" data-mode="sports">Sports Analyst</button>
           <button type="button" data-mode="creative">Creative</button>
         </div>
         <p id="caption" class="caption" aria-live="polite">The channel is open. Speak, or type.</p>
-        <p id="detail" class="detail" hidden></p>
+        <details id="detail-wrap" hidden>
+          <summary>Written answer</summary>
+          <p id="detail" class="detail"></p>
+        </details>
         <div id="followups" class="followups"></div>
         <ul id="sources" class="sources"></ul>
         <p id="open-row" class="open-row" hidden><a id="open-link" href="" target="_blank" rel="noopener noreferrer">Open site</a></p>
@@ -58,6 +62,7 @@
             <button type="button" id="mic" aria-pressed="false">Listen</button>
             <button type="submit">Send</button>
             <button type="button" id="save" disabled>Save this answer</button>
+            <button type="button" id="fresh">New chat</button>
           </div>
         </form>
         <p id="status" class="status" role="status">If this line stays, hard-reload the page.</p>

@@ -5,17 +5,21 @@ import {
   MODES,
   allowTurn,
   calculate,
+  cleanUrl,
   convert,
+  detectMode,
   dropMemory,
-  isFollowUp,
   isSensitive,
   linkRequest,
   memoryCommand,
   modeBrief,
-  needsLive,
+  pageRequest,
   parseReminder,
+  safePublicUrl,
+  searchFollow,
   searchQuery,
   searchWeb,
+  shouldSearch,
   systemPrompt,
 } from "./mind.js";
 
@@ -70,7 +74,7 @@ function sanitize(raw) {
     .slice(-30)
     .map((item) => ({
       id: String(item.id || randomUUID()).slice(0, 80),
-      text: item.text.slice(0, 180),
+      text: item.text.slice(0, 400),
       kind: item.kind === "note" || item.kind === "reminder" ? item.kind : "memory",
       at: Number(item.at) || Date.now(),
       ...(Number(item.when) ? { when: Number(item.when) } : {}),
@@ -80,9 +84,21 @@ function sanitize(raw) {
     memory,
     topic: String(raw.topic || "").slice(0, 80),
     lastLive: Boolean(raw.lastLive),
+    lastWritten: String(raw.lastWritten || "").slice(0, 500),
     mode: MODES.includes(raw.mode) ? raw.mode : "vesper",
+    modeLock: Boolean(raw.modeLock),
+    sources: cleanSources(raw.sources),
     stamps: (Array.isArray(raw.stamps) ? raw.stamps : []).map(Number).filter(Number.isFinite).slice(-24),
   };
+}
+
+function cleanSources(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 5).map((item) => ({
+    title: String(item?.title || "").slice(0, 140),
+    url: cleanUrl(item?.url),
+    snippet: String(item?.snippet || "").slice(0, 280),
+    date: String(item?.date || "").slice(0, 40),
+  })).filter((item) => item.title && item.url);
 }
 
 function publicState(state) {
@@ -91,7 +107,10 @@ function publicState(state) {
     memory: state.memory,
     topic: state.topic,
     lastLive: state.lastLive,
+    lastWritten: state.lastWritten,
     mode: state.mode,
+    modeLock: state.modeLock,
+    sources: state.sources,
     stamps: state.stamps,
   };
 }
@@ -130,9 +149,16 @@ function blankTurn(reply, extra = {}) {
 
 function localTool(state, utterance, now) {
   const command = memoryCommand(utterance);
+  if (command?.op === "save-last") {
+    const text = String(state.lastWritten || [...state.history].reverse().find((line) => line.role === "vesper")?.text || "").trim();
+    if (!text) return blankTurn("There is no answer to save yet.", { stance: "unknown" });
+    if (isSensitive(text)) return blankTurn("I will not store that. It looks like a secret.", { stance: "unknown" });
+    state.memory = state.memory.concat({ id: randomUUID(), text: text.slice(0, 400), kind: "note", at: now }).slice(-30);
+    return blankTurn("Saved. It stays on your list until you delete it.", { expression: "smile" });
+  }
   if (command?.op === "save") {
     if (isSensitive(command.text)) return blankTurn("I will not store that. It looks like a secret.", { stance: "unknown" });
-    state.memory = state.memory.concat({ id: randomUUID(), text: command.text, kind: command.kind, at: now }).slice(-30);
+    state.memory = state.memory.concat({ id: randomUUID(), text: command.text.slice(0, 400), kind: command.kind, at: now }).slice(-30);
     return blankTurn(command.kind === "note" ? "Noted. You can delete it whenever you want." : "Saved. You can forget it whenever you want.", { expression: "smile" });
   }
   if (command?.op === "forget") {
@@ -167,11 +193,45 @@ function localTool(state, utterance, now) {
   return null;
 }
 
-async function openaiTurn(state, utterance, interrupted, sources, searchError) {
-  const notes = state.memory.map((item) => `- ${item.text}`).join("\n") || "(none)";
-  const found = sources.length
+function listed(sources) {
+  return sources.length
     ? sources.map((item, index) => `${index + 1}. ${item.title} — ${item.url}${item.date ? ` — ${item.date}` : ""} — ${item.snippet}`).join("\n")
     : "(none)";
+}
+
+async function pageExcerpt(start) {
+  let url = start;
+  for (let hop = 0; hop < 3; hop += 1) {
+    const response = await fetch(url, {
+      redirect: "manual",
+      headers: { accept: "text/html,text/plain", "user-agent": "MidnightSignal/2.0" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const next = safePublicUrl(new URL(response.headers.get("location") || "", url).toString());
+      if (!next) throw new Error("Page redirect was refused");
+      url = next;
+      continue;
+    }
+    if (!response.ok) throw new Error(`Page failed (${response.status})`);
+    const length = Number(response.headers.get("content-length") || 0);
+    if (length > 500_000) throw new Error("Page is too large to summarize");
+    const html = (await response.text()).slice(0, 80_000);
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 3500);
+    if (!text) throw new Error("Page had no readable text");
+    return text;
+  }
+  throw new Error("Page redirect was refused");
+}
+
+async function openaiTurn(state, utterance, interrupted, sources, searchError, earlier, page) {
+  const notes = state.memory.map((item) => `- ${item.text}`).join("\n") || "(none)";
   const user = `Mode: ${state.mode} (${modeBrief(state.mode)})
 Topic: ${state.topic || "(none yet)"}
 Saved by the listener:
@@ -180,8 +240,11 @@ ${notes}
 Transcript:
 ${state.history.map((line) => `${line.role}: ${line.text}`).join("\n") || "(channel just opened)"}
 
-Search results, the only source for current facts:
-${found}
+Earlier sources from this conversation:
+${listed(earlier)}
+New search results, the only source for new facts:
+${listed(sources)}
+Page text: ${page || "(none)"}
 Search error: ${searchError || "none"}
 
 Listener just said: ${utterance}
@@ -239,6 +302,7 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
     if (!mode) return json(400, { error: "Pick Vesper, Researcher, Developer, Tutor, Sports Analyst, or Creative" });
     const { id, state } = sessionFor(header, body);
     state.mode = mode;
+    state.modeLock = mode !== "vesper";
     return json(200, { sessionId: id, mode, state: publicState(state), items: state.memory });
   }
 
@@ -248,11 +312,14 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
   }
 
   if (pathname === "/api/memory" && method === "POST") {
-    const text = String(body.text || "").trim().slice(0, 180);
+    const text = String(body.text || "").trim().slice(0, 400);
     if (!text) return json(400, { error: "Nothing to save" });
     if (isSensitive(text)) return json(400, { error: "That looks like a secret. I will not store it." });
     const { id, state } = sessionFor(header, body);
-    state.memory = state.memory.concat({ id: randomUUID(), text, kind: body.kind === "note" ? "note" : "memory", at: Date.now() }).slice(-30);
+    const existing = body.id ? state.memory.find((item) => item.id === String(body.id)) : null;
+    if (body.id && !existing) return json(404, { error: "That note is gone" });
+    if (existing) existing.text = text;
+    else state.memory = state.memory.concat({ id: randomUUID(), text, kind: body.kind === "note" ? "note" : "memory", at: Date.now() }).slice(-30);
     persistMemory(id, state.memory);
     return json(200, { sessionId: id, items: state.memory, state: publicState(state) });
   }
@@ -277,25 +344,42 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
     let source = tool ? "tool" : "openai";
     let sources = [];
     let searchError = "";
+    let earlier = [];
+    let follow = false;
     if (!tool) {
-      const follow = isFollowUp(utterance) && Boolean(state.topic);
-      const live = needsLive(utterance) || (follow && state.lastLive);
-      if (live) {
+      if (!state.modeLock) {
+        const picked = detectMode(utterance);
+        if (picked) state.mode = picked;
+      }
+      earlier = state.sources || [];
+      follow = searchFollow(utterance, state);
+      const live = shouldSearch(utterance, state);
+      const pageUrl = pageRequest(utterance);
+      let page = "";
+      if (pageUrl) {
+        try {
+          page = await pageExcerpt(pageUrl);
+          sources = [{ title: "Page", url: pageUrl, snippet: page.slice(0, 280), date: "" }];
+        } catch (error) {
+          searchError = publicFailure(error);
+        }
+      } else if (live) {
         try {
           sources = await searchWeb(searchQuery(utterance, state.topic, follow), { braveKey: key("BRAVE_SEARCH_API_KEY") });
         } catch (error) {
           searchError = publicFailure(error);
         }
       }
+      if (sources.length) state.sources = sources;
       if (!key("OPENAI_API_KEY")) {
         turn = fallbackTurn(utterance, interrupted);
         source = "fallback";
       } else {
         try {
-          turn = await openaiTurn(state, utterance, interrupted, sources, searchError);
+          turn = await openaiTurn(state, utterance, interrupted, sources, searchError, earlier, page);
           const previous = [...state.history].reverse().find((line) => line.role === "vesper")?.text;
           if (previous && turn.reply === previous) {
-            turn = await openaiTurn(state, `${utterance}\nDo not repeat your previous answer. Use the search results for this question.`, interrupted, sources, searchError);
+            turn = await openaiTurn(state, `${utterance}\nDo not repeat your previous answer. Use the search results for this question.`, interrupted, sources, searchError, earlier, page);
           }
         } catch (error) {
           const message = publicFailure(error);
@@ -305,11 +389,13 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
           source = "fallback";
         }
       }
-      state.lastLive = live;
+      state.lastLive = live || Boolean(pageUrl);
       if (turn.topic) state.topic = turn.topic;
+      state.lastWritten = [turn.reply, turn.detail].filter(Boolean).join("\n").slice(0, 500);
     } else {
       persistMemory(id, state.memory);
     }
+    const shown = sources.length ? sources : (follow ? earlier : []);
     state.history.push({ role: "listener", text: utterance });
     state.history.push({ role: "vesper", text: turn.reply });
     state.history = state.history.slice(-16);
@@ -322,7 +408,7 @@ export async function dispatch({ method, pathname, headers = {}, body = {} }) {
       ...turn,
       topic: turn.topic || state.topic,
       items: state.memory,
-      sources,
+      sources: shown,
       searchError,
       state: publicState(state),
     });

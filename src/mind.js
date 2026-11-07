@@ -1,12 +1,12 @@
 export const MODES = ["vesper", "researcher", "developer", "tutor", "sports", "creative"];
 
 const BRIEFS = {
-  vesper: "Friendly everyday companion. Warm, plain, and short enough to say aloud.",
-  researcher: "Detailed and evidence-backed. Separate confirmed facts, opinion, and what the sources do not say.",
-  developer: "Programming and engineering. Be precise. Show the important part, not a lecture.",
-  tutor: "Teach one step at a time and say what to try next.",
-  sports: "Match and player analysis. Scores, fixtures, and stats only when a source states them.",
-  creative: "Writing and brainstorming. Give one strong option, then one variation.",
+  vesper: "Friendly everyday companion. Warm, plain, and short enough to say aloud. Handle the topic in front of you without a lecture.",
+  researcher: "Research lead. Lead with what the sources confirm, then what they leave out. Put numbers only in the written detail.",
+  developer: "Programming partner. Name the bug or the change, then the smallest next step. Prefer a short code-shaped detail over a tour of the language.",
+  tutor: "Tutor. Teach one step, check it, then say what to try next. A study plan is a short ordered list in the written detail.",
+  sports: "Sports analyst. Talk about the match, the player, and the comparison already in the transcript. Scores and stats only when a source states them.",
+  creative: "Creative partner. Give one strong option, then one variation. Keep the spoken line performable.",
 };
 
 export function modeBrief(mode) {
@@ -18,7 +18,9 @@ export function systemPrompt(mode) {
 Mode: ${modeBrief(mode)}
 You can help with everyday questions, science, math, engineering, software, history, news, business, learning, health (general information only, never a diagnosis), entertainment, sports, travel, food, planning, and creative work.
 Conversation context is the transcript, the topic, and saved notes. Follow-up questions refer to that context. Do not ask the listener to repeat names already in the transcript.
-Current events, scores, prices, weather, releases, and "latest" claims may use ONLY the search results in the user message. If search failed or the results do not contain the fact, say you could not verify it. Never invent a source, score, date, or quote.
+Pronouns and phrases like "that player", "the other opener", and "compare them" refer to the transcript, the topic, and earlier sources. Do not ask for a name that is already there. A new subject replaces the old topic.
+The spoken reply is 1 to 3 sentences. Put the comparison, steps, or extra detail in "detail".
+Current events, scores, prices, weather, releases, and "latest" claims may use ONLY the search results and page text in the user message. If search failed or the results do not contain the fact, set stance to "unknown" and say you could not verify it. Never invent a source, score, date, statistic, or quote.
 Health answers stay general and tell the listener to ask a clinician for personal medical decisions.
 Reply ONLY with JSON:
 {
@@ -37,32 +39,78 @@ If the listener interrupted you, acknowledge the cut and answer their new words.
 
 export function needsLive(text) {
   const said = String(text ?? "");
-  if (/\b(latest|today|tonight|yesterday|current|breaking|news|score|scores|standings|fixture|fixtures|who won|weather|price|stock|release|released|live|tournament|headline|this week|right now)\b/i.test(said)) {
-    return true;
-  }
-  return /\b(cricket|football|soccer|basketball|tennis|nba|ipl|premier league|champions league|esports)\b/i.test(said)
-    && /\b(score|result|won|winning|playing|fixture|match|standings|table|stats|statistics)\b/i.test(said);
+  return /\b(latest|today|tonight|yesterday|current|breaking|news|score|scores|standings|fixture|fixtures|who won|weather|price|stock|release|released|tournament|headline|this week|right now|happening|updates?|perform(?:ed|ance)?)\b/i.test(said);
+}
+
+export function isSmallTalk(text) {
+  return /^(?:hi|hello|hey|thanks|thank you|ok|okay|yes|no|cool|good morning|good night)[.!?\s]*$/i.test(String(text ?? "").trim());
 }
 
 export function isFollowUp(text) {
-  return /\b(it|its|it's|that one|this one|those|them|they|their|previous|compare|comparison|which one|better|worse|the other|the same)\b/i.test(String(text ?? ""));
+  return /\b(it|its|it's|that|this|those|them|they|their|he|she|him|her|his|hers|previous|compare|comparison|which one|better|worse|the other|the same|opener|batter|bowler|that player)\b/i.test(String(text ?? ""));
+}
+
+export function shouldSearch(utterance, state = {}) {
+  if (isSmallTalk(utterance)) return false;
+  if (needsLive(utterance)) return true;
+  return Boolean(state.lastLive && state.topic && isFollowUp(utterance));
+}
+
+export function searchFollow(utterance, state = {}) {
+  return Boolean(state.topic && isFollowUp(utterance) && (state.lastLive || needsLive(utterance)));
+}
+
+export function detectMode(text) {
+  const said = String(text ?? "");
+  if (/\b(bug|debug|code|function|javascript|python|typescript|stack trace|compile|regex|api)\b/i.test(said)) return "developer";
+  if (/\b(cricket|ipl|batter|bowler|innings|opener|football|soccer|nba|fixture|match)\b/i.test(said)) return "sports";
+  if (/\b(study plan|quiz me|teach me|lesson|homework|explain)\b/i.test(said)) return "tutor";
+  if (/\b(poem|short story|brainstorm|write a|lyrics)\b/i.test(said)) return "creative";
+  if (/\b(research|sources|cite|paper)\b/i.test(said)) return "researcher";
+  return "";
 }
 
 export function searchQuery(utterance, topic, followUp) {
   const said = clip(utterance, 160);
-  if (followUp && topic) return clip(`${topic} ${said}`, 180);
-  return said;
+  if (!(followUp && topic)) return said;
+  if (/\b(cricket|batter|bowler|opener|innings|ipl|match)\b/i.test(`${topic} ${said}`)) return clip(`${topic} cricket stats`, 180);
+  const cleaned = said.replace(/\b(him|her|them|they|he|she|his|hers|that|this|it|the other|compare|comparison)\b/gi, " ").replace(/\s+/g, " ").trim();
+  return clip(`${topic} ${cleaned || said}`, 180);
 }
 
 export function memoryCommand(text) {
   const raw = String(text ?? "").trim();
   const forget = raw.match(/^(?:please\s+)?forget\s+(.+)$/i);
   if (forget) return { op: "forget", text: clip(forget[1], 180) };
+  if (/^(?:please\s+)?(?:save|remember)(?:\s+(?:that|this))?(?:\s+(?:comparison|answer|research|note|it))?\.?$/i.test(raw)) {
+    return { op: "save-last", kind: "note" };
+  }
   const note = raw.match(/^(?:please\s+)?(?:note|make a note)(?:\s+that)?\s+(.+)$/i);
-  if (note) return { op: "save", kind: "note", text: clip(note[1], 180) };
+  if (note) return { op: "save", kind: "note", text: clip(note[1], 400) };
   const save = raw.match(/^(?:please\s+)?(?:remember|save)(?:\s+that|\s+this)?\s+(.+)$/i);
-  if (save) return { op: "save", kind: "memory", text: clip(save[1], 180) };
+  if (save) return { op: "save", kind: "memory", text: clip(save[1], 400) };
   return null;
+}
+
+export function pageRequest(text) {
+  const match = String(text ?? "").match(/\b(?:summar(?:y|ize|ise)|read this page|read)\b[\s\S]{0,80}(https?:\/\/\S+)/i);
+  return match ? safePublicUrl(match[1]) : "";
+}
+
+export function safePublicUrl(raw) {
+  const href = cleanUrl(String(raw ?? "").replace(/[),.;]+$/, ""));
+  if (!href) return "";
+  let url;
+  try { url = new URL(href); } catch { return ""; }
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return "";
+  if (host.includes(":")) return "";
+  const parts = host.split(".").map((part) => Number(part));
+  if (parts.length === 4 && parts.every((part) => part >= 0 && part <= 255)) {
+    const [a, b] = parts;
+    if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)) return "";
+  }
+  return url.toString();
 }
 
 export function isSensitive(text) {

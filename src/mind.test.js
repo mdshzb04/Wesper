@@ -1,12 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculate, convert, dropMemory, isFollowUp, isSensitive, linkRequest, mapBrave, memoryCommand, needsLive, parseDuck, parseReminder, searchQuery, searchWeb } from "./mind.js";
+import { calculate, convert, detectMode, dropMemory, isFollowUp, isSensitive, linkRequest, mapBrave, memoryCommand, needsLive, parseDuck, parseReminder, safePublicUrl, searchFollow, searchQuery, searchWeb, shouldSearch } from "./mind.js";
 
 test("live questions search, and a follow-up keeps the topic", () => {
   assert.equal(needsLive("Tell me about the latest OpenAI model"), true);
   assert.equal(needsLive("what is photosynthesis"), false);
+  assert.equal(needsLive("What's happening in Indian cricket?"), true);
+  assert.equal(shouldSearch("hello", { lastLive: true, topic: "Indian cricket" }), false);
+  assert.equal(shouldSearch("How did India's top batter perform?", {}), true);
+  assert.equal(shouldSearch("Compare him with the other opener.", { lastLive: true, topic: "Indian cricket" }), true);
   assert.equal(isFollowUp("Compare it with the previous one"), true);
+  assert.equal(isFollowUp("Compare him with the other opener."), true);
+  assert.equal(searchFollow("Compare him with the other opener.", { lastLive: true, topic: "Indian cricket" }), true);
   assert.equal(searchQuery("Which one is better for coding?", "latest OpenAI model", true), "latest OpenAI model Which one is better for coding?");
+  assert.equal(searchQuery("Compare him with the other opener.", "Abhishek Sharma performance", true), "Abhishek Sharma performance cricket stats");
+  assert.equal(detectMode("What's happening in Indian cricket?"), "sports");
+  assert.equal(detectMode("debug this stack trace"), "developer");
+  assert.equal(detectMode("what is photosynthesis"), "");
+  assert.equal(safePublicUrl("http://127.0.0.1/secret"), "");
+  assert.equal(safePublicUrl("https://example.com/docs"), "https://example.com/docs");
 });
 
 test("arithmetic and conversion stay inside a safe parser", () => {
@@ -18,6 +30,7 @@ test("arithmetic and conversion stay inside a safe parser", () => {
 
 test("memory is explicit and secrets are refused", () => {
   assert.deepEqual(memoryCommand("remember that I prefer TypeScript"), { op: "save", kind: "memory", text: "I prefer TypeScript" });
+  assert.deepEqual(memoryCommand("Save that comparison."), { op: "save-last", kind: "note" });
   assert.equal(memoryCommand("what is the weather") , null);
   assert.equal(isSensitive("remember my password is hunter2"), true);
   const dropped = dropMemory([{ id: "1", text: "I prefer TypeScript" }, { id: "2", text: "likes cricket" }], "typescript");

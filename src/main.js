@@ -10,6 +10,8 @@ const micButton = document.querySelector("#mic");
 const saveButton = document.querySelector("#save");
 const form = document.querySelector("#composer");
 const detail = document.querySelector("#detail");
+const detailWrap = document.querySelector("#detail-wrap");
+const freshButton = document.querySelector("#fresh");
 const followups = document.querySelector("#followups");
 const sources = document.querySelector("#sources");
 const openRow = document.querySelector("#open-row");
@@ -234,6 +236,7 @@ micButton.addEventListener("click", () => {
     if (phase === "listening") mark("idle");
     return;
   }
+  if (phase === "speaking" || phase === "thinking") cutCarrier();
   void openEar();
 });
 
@@ -323,12 +326,24 @@ async function openEar() {
   sayStatus("Listening");
 }
 
+function paintMode(mode) {
+  for (const item of document.querySelectorAll("#modes button")) {
+    item.setAttribute("aria-pressed", String(item.dataset.mode === mode));
+  }
+}
+
 function showTurn(turn) {
-  lastAnswer = turn.reply || "";
+  const written = [turn.reply, turn.detail].filter(Boolean).join("\n");
+  lastAnswer = written.slice(0, 400);
   saveButton.disabled = !lastAnswer;
   caption.textContent = turn.reply;
-  detail.textContent = turn.detail || "";
-  detail.hidden = !turn.detail;
+  const extra = turn.stance === "unknown"
+    ? `Unverified. ${turn.detail || "I could not confirm this from a source."}`
+    : (turn.detail || "");
+  detail.textContent = extra;
+  detailWrap.hidden = !extra;
+  if (extra) detailWrap.open = false;
+  if (turn.mode) paintMode(turn.mode);
   sources.replaceChildren();
   for (const source of turn.sources || []) {
     if (!/^https?:\/\//i.test(source.url || "")) continue;
@@ -381,6 +396,31 @@ function renderMemory(items) {
     const label = document.createElement("span");
     const when = item.kind === "reminder" && item.when ? ` · ${new Date(item.when).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
     label.textContent = `${item.text}${when}`;
+    const actions = document.createElement("span");
+    actions.className = "note-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => {
+      if (edit.textContent === "Edit") {
+        const input = document.createElement("input");
+        input.value = item.text;
+        input.setAttribute("aria-label", "Edit note");
+        label.replaceWith(input);
+        edit.textContent = "Keep";
+        edit.dataset.editing = "true";
+        return;
+      }
+      const input = row.querySelector("input");
+      void fetch("/api/memory", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-session": sessionId },
+        body: JSON.stringify({ id: item.id, text: input?.value || "", state: appState }),
+      }).then((response) => readJson(response)).then((data) => {
+        renderMemory(data.items || []);
+        sayStatus("Note updated");
+      }).catch((error) => sayStatus(error.message || "Could not edit that note"));
+    });
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "Delete";
@@ -393,7 +433,8 @@ function renderMemory(items) {
         renderMemory(data.items || []);
       }).catch((error) => sayStatus(error.message || "Could not delete that note"));
     });
-    row.append(label, button);
+    actions.append(edit, button);
+    row.append(label, actions);
     memories.append(row);
   }
 }
@@ -417,6 +458,28 @@ document.querySelector("#modes").addEventListener("click", (event) => {
   }).catch((error) => sayStatus(error.message));
 });
 
+freshButton.addEventListener("click", () => {
+  stopVoice();
+  if (ear) {
+    ear.stop();
+    ear = null;
+    micButton.textContent = "Listen";
+    micButton.setAttribute("aria-pressed", "false");
+  }
+  appState = { ...appState, history: [], topic: "", lastLive: false, sources: [], lastWritten: "" };
+  keepState(appState);
+  book.replaceChildren();
+  sources.replaceChildren();
+  followups.replaceChildren();
+  caption.textContent = "New conversation. Saved notes stay.";
+  detail.textContent = "";
+  detailWrap.hidden = true;
+  lastAnswer = "";
+  saveButton.disabled = true;
+  mark("idle");
+  sayStatus("Fresh conversation");
+});
+
 saveButton.addEventListener("click", () => {
   if (!lastAnswer) return;
   void fetch("/api/memory", {
@@ -431,17 +494,23 @@ saveButton.addEventListener("click", () => {
 });
 
 if (Array.isArray(appState.memory) && appState.memory.length) renderMemory(appState.memory);
-if (appState.mode) {
-  for (const item of document.querySelectorAll("#modes button")) {
-    item.setAttribute("aria-pressed", String(item.dataset.mode === appState.mode));
-  }
+if (appState.mode) paintMode(appState.mode);
+for (const line of appState.history || []) {
+  if (line && line.text) writeLog(line.role === "vesper" ? "Vesper" : "You", line.text);
+}
+if (appState.lastWritten) {
+  lastAnswer = String(appState.lastWritten).slice(0, 400);
+  saveButton.disabled = !lastAnswer;
+  caption.textContent = appState.history?.at(-1)?.text || caption.textContent;
 }
 
 fetch("/api/status")
   .then((response) => readJson(response))
   .then(async (flags) => {
     const missing = ["assemblyai", "openai"].filter((name) => !flags[name]);
+    const due = (appState.memory || []).find((item) => item.kind === "reminder" && item.when && item.when <= Date.now());
     if (missing.length) sayStatus(`Server still needs ${missing.join(", ")}`);
+    else if (due) sayStatus(`Reminder: ${due.text}`);
     else sayStatus("Channel ready");
     if (!appState.memory?.length && /^[a-zA-Z0-9-]{8,80}$/.test(sessionId)) {
       const data = await readJson(await fetch("/api/memory", { headers: { "x-session": sessionId } }));
